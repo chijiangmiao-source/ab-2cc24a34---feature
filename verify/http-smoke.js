@@ -58,6 +58,8 @@ async function waitReady(retries = 30) {
     assert(/text\/html/.test(r.type), 'Content-Type=' + r.type);
     assert(r.text.includes('Schreier'), '页面缺少 Schreier 关键内容');
     assert(r.text.includes('app.js'), '页面未加载 app.js');
+    assert(r.text.includes('整组奇偶复核'), '页面缺少奇偶复核模式入口');
+    assert(r.text.includes('parity-panel'), '页面缺少奇偶要求面板');
   });
 
   for (const asset of ['app.js', 'worker.js', 'core.js', 'style.css']) {

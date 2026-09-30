@@ -17,6 +17,21 @@
 
   <main>
     <section class="panel">
+      <h2>审计模式</h2>
+      <div class="mode-switch" role="tablist">
+        <label class="mode-option">
+          <input type="radio" name="mode" value="normal" checked />
+          <span>普通可导出性审计</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="parity" />
+          <span>整组奇偶复核（逐操作偶/奇次数）</span>
+        </label>
+      </div>
+      <p id="mode-hint" class="hint">
+        普通模式：判定目标接线能否由允许的换位操作导出，并给出可逐步回放的操作因子链。
+      </p>
+
       <h2>1. 稳定端口（2–12 个，空格/逗号分隔）</h2>
       <input id="ports" type="text" spellcheck="false" placeholder="A B C D" />
 
@@ -33,6 +48,17 @@
 
       <h2>3. 目标置换</h2>
       <input id="target" type="text" spellcheck="false" placeholder="(A C)(B D)" />
+
+      <div id="parity-panel" class="parity-panel hidden">
+        <h2>4. 整组奇偶要求</h2>
+        <p class="hint">
+          为<span class="b">每个已定义操作</span>指定其在本次规程中须出现
+          <span class="b">偶数次</span>或<span class="b">奇数次</span>
+          （执行逆操作同样计入该操作一次）。每个操作行右侧的下拉框即其偶/奇选择；
+          系统在既有确定性 Schreier–Sims 归约中构造恒等关系的 GF(2) 奇偶空间求解，
+          不枚举群元素、不穷举操作串。
+        </p>
+      </div>
 
       <div class="btn-row submit-row">
         <button id="btn-audit" type="button">发起审计</button>
@@ -61,7 +87,8 @@
   </main>
 
   <footer>
-    成员判定仅使用稳定子链横截剥离复算，不枚举全部操作串、不使用随机搜索、不以有限深度回放代替。
+    成员判定仅使用稳定子链横截剥离复算；整组奇偶复核在该归约构造的恒等关系 GF(2)
+    奇偶空间内求解并回构因子链。不枚举全部群元素或操作串、不使用随机搜索、不以有限深度回放代替。
   </footer>
 
   <script src="app.js"></script>

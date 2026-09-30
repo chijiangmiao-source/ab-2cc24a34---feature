@@ -117,3 +117,73 @@ test('Worker：计算异常被捕获并以错误回包返回，requestId 保留'
   assert.equal(m.result.ok, false);
   assert.ok(Array.isArray(m.result.errors));
 });
+
+test('Worker：奇偶复核可满足往返，回包带规范链、逐操作计数与逐步计数', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C',
+      operations: [
+        { name: 'a', mapping: '(A B C)' },
+        { name: 'b', mapping: '(A B)' },
+      ],
+      target: '(A C)',
+      mode: 'parity',
+      parity: ['even', 'odd'],
+    },
+    11
+  );
+  const m = w.messages[0];
+  assert.equal(m.type, 'audit-response');
+  assert.equal(m.requestId, 11);
+  assert.equal(m.result.ok, true);
+  assert.equal(m.result.mode, 'parity');
+  assert.equal(m.result.reason, 'parity-derivable');
+  assert.equal(m.result.paritySatisfied, true);
+  assert.equal(m.result.parityCounts[1] & 1, 1);
+  assert.equal(m.result.parityCounts[0] & 1, 0);
+  // 逐步回放每步带逐操作累计计数
+  const last = m.result.steps[m.result.steps.length - 1];
+  assert.deepEqual(last.counts, m.result.parityCounts);
+});
+
+test('Worker：奇偶复核不可满足时回包带代表奇偶、差额与关系基', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C',
+      operations: [
+        { name: 'a', mapping: '(A B C)' },
+        { name: 'b', mapping: '(A B)' },
+      ],
+      target: '(A C)',
+      mode: 'parity',
+      parity: ['even', 'even'],
+    },
+    12
+  );
+  const m = w.messages[0];
+  assert.equal(m.result.reason, 'parity-infeasible');
+  assert.equal(m.result.paritySatisfied, false);
+  assert.ok(Array.isArray(m.result.representativeParity));
+  assert.ok(Array.isArray(m.result.parityDiff));
+  assert.ok(Array.isArray(m.result.relationBasis));
+});
+
+test('Worker：奇偶模式下目标不可导出，仍回传首个阻塞层', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C D',
+      operations: [{ name: 'r', mapping: '(A B C D)' }],
+      target: '(A B)',
+      mode: 'parity',
+      parity: ['odd'],
+    },
+    13
+  );
+  const m = w.messages[0];
+  assert.equal(m.result.member, false);
+  assert.equal(m.result.reason, 'blocked');
+  assert.equal(m.result.mode, 'parity');
+});

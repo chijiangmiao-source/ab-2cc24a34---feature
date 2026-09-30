@@ -67,7 +67,18 @@ if (!/importScripts\(['"]core\.js['"]\)/.test(workerSrc)) {
 
 console.log('3) 核心模块可加载且 API 完整…');
 const C = require(path.join(root, 'public', 'core.js'));
-for (const fn of ['audit', 'membership', 'buildChain', 'validateInput', 'expandFactorChain', 'acceptIfCurrent']) {
+for (const fn of [
+  'audit',
+  'membership',
+  'parityMembership',
+  'buildChain',
+  'validateInput',
+  'expandFactorChain',
+  'acceptIfCurrent',
+  'buildIdentityRelations',
+  'gf2RelationBasis',
+  'gf2SolveConstrained',
+]) {
   if (typeof C[fn] !== 'function') fail('core.js 缺少导出：' + fn);
 }
 if (failures === 0) console.log('   ✓ 核心 API 齐全');

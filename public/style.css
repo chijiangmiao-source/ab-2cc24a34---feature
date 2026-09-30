@@ -65,10 +65,76 @@ input[type="text"]:focus {
 
 .op-row {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px 1fr auto;
   gap: 10px;
   margin-bottom: 8px;
+  align-items: center;
 }
+
+.op-parity {
+  display: none;
+  background: #0d1320;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+body[data-mode="parity"] .op-parity { display: inline-block; }
+
+.mode-switch { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--chip);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.mode-option input { accent-color: var(--accent); }
+
+.parity-panel {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 5px;
+  padding: 1px 9px;
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  border: 1px solid var(--border);
+}
+.chip.even { background: rgba(79, 140, 255, 0.14); color: #9fc0ff; }
+.chip.odd { background: rgba(255, 120, 73, 0.15); color: var(--warn); }
+.okmark { color: var(--ok); font-weight: 700; }
+.badmark { color: var(--bad); font-weight: 700; }
+
+.parity-table, .basis-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0 6px;
+  font-size: 13px;
+}
+.parity-table th, .parity-table td,
+.basis-table th, .basis-table td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: center;
+}
+.parity-table th, .basis-table th { background: var(--chip); }
+.parity-table .opname { font-family: ui-monospace, monospace; text-align: left; }
+.parity-table.replay-counts { margin-top: 14px; }
+.basis-table .vec { white-space: nowrap; font-family: ui-monospace, monospace; letter-spacing: 2px; }
+.vecbit { display: inline-block; min-width: 14px; }
+.vecbit.one { color: var(--warn); font-weight: 700; }
+.vecbit.zero { color: var(--muted); }
+.basis-table .wordcell { text-align: left; min-width: 240px; }
 
 .hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 10px; }
 code {
