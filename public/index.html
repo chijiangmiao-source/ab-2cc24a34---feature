@@ -17,6 +17,18 @@
 
   <main>
     <section class="panel">
+      <h2>审计模式</h2>
+      <div class="mode-switch" role="tablist" aria-label="审计模式">
+        <label class="mode-choice">
+          <input type="radio" name="mode" value="normal" checked />
+          <span>普通可导出复核</span>
+        </label>
+        <label class="mode-choice">
+          <input type="radio" name="mode" value="parity" />
+          <span>执行奇偶复核（指定每操作出现奇/偶数次）</span>
+        </label>
+      </div>
+
       <h2>1. 稳定端口（2–12 个，空格/逗号分隔）</h2>
       <input id="ports" type="text" spellcheck="false" placeholder="A B C D" />
 
@@ -24,6 +36,8 @@
       <p class="hint">
         支持循环记号 <code>(A B)(C D)</code> 或显式映射 <code>A-&gt;B, B-&gt;A</code>；
         操作允许执行其逆操作。每个操作必须是全部端口上的双射。
+        <span id="parity-hint" class="hidden">奇偶复核模式下，还须为每个操作指定本次规程中出现
+        <span class="b">奇数次</span>还是<span class="b">偶数次</span>（逆操作仍计入该操作一次）。</span>
       </p>
       <div id="ops" class="ops"></div>
       <div class="btn-row">
@@ -61,7 +75,8 @@
   </main>
 
   <footer>
-    成员判定仅使用稳定子链横截剥离复算，不枚举全部操作串、不使用随机搜索、不以有限深度回放代替。
+    成员判定仅使用稳定子链横截剥离复算；执行奇偶复核仅在该链上做 GF(2) 奇偶空间求解与词回构——
+    不枚举全部群元素、不穷举操作串、不使用随机搜索、不以有限深度回放代替。
   </footer>
 
   <script src="app.js"></script>

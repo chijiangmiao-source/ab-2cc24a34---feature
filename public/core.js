@@ -227,12 +227,13 @@ function parsePermText(text, names, indexByName) {
 }
 
 /*
- * 全量校验：端口、操作（具名置换）、目标。
- * 所有错误一次性返回（重复操作名、缺失端口、非双射映射、非法目标等），
+ * 全量校验：端口、操作（具名置换）、目标；奇偶复核模式下还校验每操作奇偶选择。
+ * 所有错误一次性返回（重复操作名、缺失端口、非双射映射、非法目标、未指定奇偶等），
  * 调用方据此立即撤销旧结论。
  */
 function validateInput(input) {
   const errors = [];
+  const mode = input.mode === 'parity' ? 'parity' : 'normal';
   const { names, errors: portErrors } = parsePortList(input.ports || '');
   for (const e of portErrors) errors.push({ scope: 'ports', message: e });
 
@@ -293,6 +294,31 @@ function validateInput(input) {
     target = perm;
   }
 
+  // 奇偶复核模式：每个已定义操作都必须指定本次规程中出现奇数次还是偶数次
+  let parity = null;
+  if (mode === 'parity') {
+    const validParity = new Set([0, 1, 'odd', 'even']);
+    parity = operations.map(() => 0);
+    const rawParity = Array.isArray(input.parity) ? input.parity : [];
+    operations.forEach((op, idx) => {
+      if (!validParity.has(rawParity[idx])) {
+        errors.push({
+          scope: 'parity',
+          index: idx,
+          message:
+            '操作“' +
+            (String(op.name == null ? '' : op.name).trim() || '操作' + (idx + 1)) +
+            '”未指定奇偶要求（奇数次/偶数次）',
+        });
+      }
+    });
+    if (!errors.some((e) => e.scope === 'parity')) {
+      rawParity.forEach((v, idx) => {
+        parity[idx] = v === 1 || v === 'odd' ? 1 : 0;
+      });
+    }
+  }
+
   if (errors.length) return { ok: false, errors, names: [], operations: [], target: null };
 
   // 生成元按操作名排序，保证构造过程完全确定（端口标识亦已排序）
@@ -300,12 +326,15 @@ function validateInput(input) {
     ops[a].name < ops[b].name ? -1 : ops[a].name > ops[b].name ? 1 : a - b
   );
   const sortedOps = order.map((i) => ops[i]);
+  const sortedParity = parity ? order.map((i) => parity[i]) : null;
   return {
     ok: true,
     errors: [],
+    mode,
     names,
     operations: sortedOps,
     target,
+    parity: sortedParity,
   };
 }
 
@@ -436,6 +465,135 @@ function buildChain(n, generators, genWords) {
   return levels;
 }
 
+// ---------------- GF(2) 奇偶空间（恒等关系空间） ----------------
+//
+// 对群 G = <g_0,...,g_{m-1}>，记 F 为生成元（含逆元）上的自由群，φ:F→G 为字映射，
+// N = ker φ 为恒等关系词集合。每个词 w ∈ N 对应 GF(2)^m 奇偶向量 par(w)：
+// 第 k 位为词中第 k 个操作（其逆元记号仍记一次该操作）出现次数模 2。
+// 若已有代表词 w0（φ(w0)=target，奇偶 p0），则存在奇偶向量恰为 d 的规程
+//   ⇔ d + p0 ∈ { par(w) : w ∈ N }（GF(2) 加法）。
+//
+// 完备稳定子链下，每层每个 Schreier 生成元
+//   s = β(x)·g·β(g(x))⁻¹ ∈ G^(i+1)
+// 都能被更深层横截代表完全剥离为恒等：s 的 Schreier 词拼上剥离用代表逆词，
+// 即得一个补偶恒等词。这些词的奇偶向量张成整个 N 的奇偶空间——
+// 任一词在逐层剥离中被精确改写为 Schreier 词与代表词的乘积（Reidemeister–
+// Schreier 重写），其模 2 像即这些关系的组合。全程仅做 GF(2) 线性代数，
+// 不枚举群元素、不穷举操作串、不以有限深度搜索代替。
+
+// 因子词 -> GF(2) 奇偶向量（长度 m 的 0/1 数组）；逆元记号与正元同属一个操作
+function wordParityVector(word, m) {
+  const v = new Array(m).fill(0);
+  for (const tok of word) v[Math.abs(tok) - 1] ^= 1;
+  return v;
+}
+
+function vecCopy(v) {
+  return v.slice();
+}
+function vecXor(a, b) {
+  const r = new Array(a.length);
+  for (let i = 0; i < a.length; i++) r[i] = a[i] ^ b[i];
+  return r;
+}
+
+/*
+ * 从完备稳定子链构造恒等关系的奇偶空间。
+ * 返回 { basis, basisWords }：
+ *   basis[k]      —— 第 k 个独立关系的 GF(2)^m 奇偶向量（主元列严格递增的行阶梯形）
+ *   basisWords[k] —— 对应的补偶恒等因子词（逐操作乘回必为恒等）
+ */
+function buildParitySpace(n, m, levels) {
+  const rows = []; // 每个 Schreier 关系一条 { vec, word }
+  for (let i = 0; i < n; i++) {
+    const L = levels[i];
+    for (let x = 0; x < n; x++) {
+      if (L.beta[x] == null) continue;
+      for (let gi = 0; gi < L.S.length; gi++) {
+        const g = L.S[gi];
+        const y = g[x];
+        if (L.beta[y] == null) continue;
+        // Schreier 置换 β(x)·g·β(y)⁻¹ 固定基点 i；其词为头段
+        const perm0 = compose(compose(L.beta[x], g, n), L.inv[y], n);
+        const word0 = concatWord(
+          concatWord(L.word[x], L.genWord[gi]),
+          invertWord(L.word[y])
+        );
+        // 完备链下自 i+1 层起横截剥离必到恒等；同步拼出补偶恒等词
+        let perm = perm0;
+        let word = word0;
+        for (let j = i + 1; j < n; j++) {
+          const Lj = levels[j];
+          const z = perm[j];
+          if (z === j) continue;
+          perm = compose(perm, Lj.inv[z], n);
+          word = concatWord(word, invertWord(Lj.word[z]));
+        }
+        if (!isIdentity(perm)) continue; // 链已完备，理论上不发生
+        const vec = wordParityVector(word, m);
+        if (vec.every((b) => b === 0)) continue; // 自身偶词，零向量无信息
+        rows.push({ vec, word });
+      }
+    }
+  }
+
+  // GF(2) 高斯消元（按层/点/生成元的确定性录入顺序），保留行组合以回构关系词
+  const basis = [];
+  const basisWords = [];
+  const pivotOf = new Map(); // 主元列 -> basis 行号
+  for (const row of rows) {
+    let vec = vecCopy(row.vec);
+    let word = row.word.slice();
+    for (;;) {
+      let col = -1;
+      for (let k = 0; k < m; k++) {
+        if (vec[k]) {
+          col = k;
+          break;
+        }
+      }
+      if (col === -1) break; // 与已有基线性相关，丢弃
+      if (pivotOf.has(col)) {
+        const bi = pivotOf.get(col);
+        vec = vecXor(vec, basis[bi]);
+        // 奇偶向量模 2 相加 <=> 两个恒等词拼接（积仍为恒等）
+        word = concatWord(word, basisWords[bi]);
+        continue;
+      }
+      pivotOf.set(col, basis.length);
+      basis.push(vec);
+      basisWords.push(word);
+      break;
+    }
+  }
+  return { basis, basisWords };
+}
+
+/*
+ * 在奇偶空间中求解 v ∈ span(basis)（GF(2)）。
+ * basis 为主元列严格递增的行阶梯形；返回系数 c（v = Σ c[k]·basis[k]），无解返回 null。
+ */
+function solveParity(basis, v) {
+  const m = v.length;
+  const cur = vecCopy(v);
+  const c = new Array(basis.length).fill(0);
+  for (let k = 0; k < basis.length; k++) {
+    let pivot = -1;
+    for (let j = 0; j < m; j++) {
+      if (basis[k][j]) {
+        pivot = j;
+        break;
+      }
+    }
+    if (pivot === -1) continue;
+    if (cur[pivot]) {
+      c[k] = 1;
+      for (let j = 0; j < m; j++) cur[j] ^= basis[k][j];
+    }
+  }
+  return cur.every((b) => b === 0) ? c : null;
+}
+
 // ---------------- 成员判定与因子链 / 不可归约证据 ----------------
 
 function orbitPoints(level, n) {
@@ -446,8 +604,10 @@ function orbitPoints(level, n) {
   return pts;
 }
 
-function membership(names, operations, target) {
+function membership(names, operations, target, desiredParity) {
   const n = names.length;
+  const m = operations.length;
+  const parityMode = Array.isArray(desiredParity);
   const generators = operations.map((o) => o.perm);
   const genWords = generators.map((_, i) => [i + 1]);
   const levels = buildChain(n, generators, genWords);
@@ -499,9 +659,9 @@ function membership(names, operations, target) {
     cur = compose(cur, invert(rep, n), n);
   }
   // target = t_{n-1} * … * t_1 * t_0，可执行因子链按层序反转后拼接
-  const factorWord = [];
+  const repFactorWord = [];
   for (let i = n - 1; i >= 0; i--) {
-    for (const tok of layerWords[i]) factorWord.push(tok);
+    for (const tok of layerWords[i]) repFactorWord.push(tok);
   }
 
   if (!isIdentity(cur)) {
@@ -516,7 +676,7 @@ function membership(names, operations, target) {
   }
 
   // 独立复算：把横截代表拼出的因子词逐操作乘回，必须恰好等于目标
-  const rebuilt = multiplyWord(factorWord, generators, n);
+  const rebuilt = multiplyWord(repFactorWord, generators, n);
   if (!equalPerm(rebuilt, target)) {
     return {
       member: false,
@@ -527,11 +687,92 @@ function membership(names, operations, target) {
     };
   }
 
+  // 普通可导出模式：代表因子链即最终结论
+  if (!parityMode) {
+    return {
+      member: true,
+      reason: 'derivable',
+      factorWord: repFactorWord,
+      layers,
+      chainSummary: summarizeChain(levels, n),
+    };
+  }
+
+  // 奇偶复核模式：在恒等关系的 GF(2) 奇偶空间中为代表词补齐奇偶
+  const repParity = wordParityVector(repFactorWord, m);
+  const diff = vecXor(repParity, desiredParity);
+  const space = buildParitySpace(n, m, levels);
+  const coeffs = solveParity(space.basis, diff);
+
+  const parityInfo = {
+    desiredParity: desiredParity.slice(),
+    repParity,
+    parityDiff: diff,
+    basis: space.basis.map(vecCopy),
+  };
+
+  if (coeffs === null) {
+    // 目标可导出，但不存在满足整组奇偶要求的操作链
+    return {
+      member: true,
+      paritySatisfied: false,
+      reason: 'parity-infeasible',
+      factorWord: repFactorWord,
+      repFactorWord,
+      layers,
+      ...parityInfo,
+      chainSummary: summarizeChain(levels, n),
+    };
+  }
+
+  // 回构补偶恒等词 correction：Σ c[k]·basis[k] = diff，对应恒等词依次拼接
+  const correctionWord = [];
+  const usedRelations = [];
+  for (let k = 0; k < coeffs.length; k++) {
+    if (!coeffs[k]) continue;
+    usedRelations.push({ index: k, vector: space.basis[k].slice() });
+    for (const tok of space.basisWords[k]) correctionWord.push(tok);
+  }
+
+  // 独立校验一：补偶词乘回必须恰为恒等
+  if (!isIdentity(multiplyWord(correctionWord, generators, n))) {
+    return {
+      member: false,
+      reason: 'verify-mismatch',
+      blockedLayer: -1,
+      evidence: { level: -1, base: -1, attemptedImage: -1, orbit: [], residual: null },
+      ...parityInfo,
+      chainSummary: summarizeChain(levels, n),
+    };
+  }
+
+  const factorWord = concatWord(repFactorWord, correctionWord);
+
+  // 独立校验二：完整因子链乘回必须等于目标，且奇偶向量必须等于整组要求
+  const finalPerm = multiplyWord(factorWord, generators, n);
+  const finalParity = wordParityVector(factorWord, m);
+  if (!equalPerm(finalPerm, target) || finalParity.some((b, k) => b !== desiredParity[k])) {
+    return {
+      member: false,
+      reason: 'verify-mismatch',
+      blockedLayer: -1,
+      evidence: { level: -1, base: -1, attemptedImage: -1, orbit: [], residual: finalPerm },
+      ...parityInfo,
+      chainSummary: summarizeChain(levels, n),
+    };
+  }
+
   return {
     member: true,
+    paritySatisfied: true,
     reason: 'derivable',
     factorWord,
+    repFactorWord,
+    correctionWord,
+    usedRelations,
+    finalParity,
     layers,
+    ...parityInfo,
     chainSummary: summarizeChain(levels, n),
   };
 }
@@ -545,17 +786,23 @@ function summarizeChain(levels, n) {
   }));
 }
 
-// 把因子词展开为可逐步回放的操作步骤，并给出每步后的端口排列
+// 把因子词展开为可逐步回放的操作步骤，并给出每步后的端口排列、
+// 逐操作累计出现次数与奇偶位（供整组奇偶要求逐操作核对）。
 function expandFactorChain(names, operations, factorWord) {
   const n = names.length;
+  const m = operations.length;
   const generators = operations.map((o) => o.perm);
   const state = identity(n);
+  const counts = new Array(m).fill(0);
   const steps = [
     {
       index: 0,
       operation: null,
+      operationIndex: -1,
       inverse: false,
       perm: state.slice(),
+      counts: counts.slice(),
+      parity: counts.map((c) => c & 1),
     },
   ];
   factorWord.forEach((tok, idx) => {
@@ -564,11 +811,15 @@ function expandFactorChain(names, operations, factorWord) {
     const g = inverse ? invert(generators[k], n) : generators[k];
     const next = compose(state, g, n);
     for (let i = 0; i < n; i++) state[i] = next[i];
+    counts[k] += 1; // 逆操作仍计为该操作出现一次
     steps.push({
       index: idx + 1,
       operation: operations[k].name,
+      operationIndex: k,
       inverse,
       perm: state.slice(),
+      counts: counts.slice(),
+      parity: counts.map((c) => c & 1),
     });
   });
   return steps;
@@ -579,22 +830,47 @@ function permToNames(perm, names) {
   return perm.map((v, i) => ({ from: names[i], to: v >= 0 ? names[v] : null }));
 }
 
-// 完整审计：校验 + 成员判定。输入不合法时返回全部错误。
+// 完整审计：校验 + 成员判定（含奇偶复核）。输入不合法时返回全部错误。
 function audit(input) {
   const v = validateInput(input);
   if (!v.ok) return { ok: false, errors: v.errors };
-  const result = membership(v.names, v.operations, v.target);
+  const result = membership(v.names, v.operations, v.target, v.parity);
   if (result.member) {
     result.steps = expandFactorChain(v.names, v.operations, result.factorWord);
   }
+  result.ok = true;
+  result.mode = v.mode;
   result.names = v.names;
   result.operationNames = v.operations.map((o) => o.name);
-  result.ok = true;
+  if (v.mode === 'parity') {
+    // 奇偶复核：逐操作标注目标奇偶，供 UI 逐操作核对
+    result.desiredParity = v.parity.slice();
+    if (Array.isArray(result.basis)) {
+      result.basisRelations = result.basis.map((vec, i) => ({
+        index: i,
+        vector: vec.slice(),
+        entries: v.operations.map((o, k) => ({
+          operation: o.name,
+          bit: vec[k],
+        })),
+      }));
+    }
+    if (Array.isArray(result.repParity)) {
+      result.repParityEntries = v.operations.map((o, k) => ({
+        operation: o.name,
+        bit: result.repParity[k],
+        desired: v.parity[k],
+        diff: result.parityDiff[k],
+      }));
+    }
+  }
   if (result.evidence) {
     result.evidence.baseName = names_v(v, result.evidence.base);
     result.evidence.attemptedImageName = names_v(v, result.evidence.attemptedImage);
     result.evidence.orbitNames = result.evidence.orbit.map((x) => v.names[x]);
-    result.evidence.residualMapping = permToNames(result.evidence.residual, v.names);
+    if (result.evidence.residual) {
+      result.evidence.residualMapping = permToNames(result.evidence.residual, v.names);
+    }
   }
   return result;
 }
@@ -626,6 +902,9 @@ const api = {
   expandFactorChain,
   permToNames,
   multiplyWord,
+  wordParityVector,
+  buildParitySpace,
+  solveParity,
   audit,
   acceptIfCurrent,
 };

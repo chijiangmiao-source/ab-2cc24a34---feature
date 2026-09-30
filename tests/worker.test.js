@@ -117,3 +117,129 @@ test('Worker：计算异常被捕获并以错误回包返回，requestId 保留'
   assert.equal(m.result.ok, false);
   assert.ok(Array.isArray(m.result.errors));
 });
+
+test('Worker：奇偶复核可行往返——回包含规范因子链、补偶词与逐操作计数', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C',
+      mode: 'parity',
+      operations: [
+        { name: 'r', mapping: '(A B C)' },
+        { name: 's', mapping: '(A B)' },
+      ],
+      parity: [1, 1],
+      target: '(A B)',
+    },
+    11
+  );
+  const m = w.messages[0];
+  assert.equal(m.type, 'audit-response');
+  assert.equal(m.requestId, 11);
+  assert.equal(m.result.ok, true);
+  assert.equal(m.result.member, true);
+  assert.equal(m.result.paritySatisfied, true);
+  assert.ok(m.result.correctionWord.length > 0);
+  // vm 跨 realm 数组原型不同，按结构序列化比较
+  assert.equal(JSON.stringify(m.result.finalParity), '[1,1]');
+  const last = m.result.steps[m.result.steps.length - 1];
+  assert.equal(JSON.stringify(last.parity), '[1,1]');
+  assert.ok(Array.isArray(last.counts));
+});
+
+test('Worker：奇偶复核不可满足回包含代表向量、差额与独立关系基', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C',
+      mode: 'parity',
+      operations: [
+        { name: 'r', mapping: '(A B C)' },
+        { name: 's', mapping: '(A B)' },
+      ],
+      parity: [0, 0],
+      target: '(A B)',
+    },
+    12
+  );
+  const m = w.messages[0];
+  assert.equal(m.requestId, 12);
+  assert.equal(m.result.member, true);
+  assert.equal(m.result.paritySatisfied, false);
+  assert.equal(m.result.reason, 'parity-infeasible');
+  assert.equal(JSON.stringify(m.result.repParity), '[0,1]');
+  assert.equal(JSON.stringify(m.result.parityDiff), '[0,1]');
+  assert.equal(JSON.stringify(m.result.basis), '[[1,0]]');
+  assert.ok(m.result.basisRelations[0].entries.length === 2);
+});
+
+test('Worker：目标不可导出时奇偶模式仍返回首个阻塞层', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B C D',
+      mode: 'parity',
+      operations: [{ name: 'rotate', mapping: '(A B C D)' }],
+      parity: [1],
+      target: '(A B)',
+    },
+    13
+  );
+  const m = w.messages[0];
+  assert.equal(m.result.member, false);
+  assert.equal(m.result.reason, 'blocked');
+  assert.equal(m.result.paritySatisfied, undefined);
+});
+
+test('Worker：奇偶模式未逐操作指定要求时回传 parity 作用域错误', () => {
+  const w = createWorker();
+  w.post(
+    {
+      ports: 'A B',
+      mode: 'parity',
+      operations: [{ name: 'x', mapping: '(A B)' }],
+      parity: [],
+      target: '(A B)',
+    },
+    14
+  );
+  const m = w.messages[0];
+  assert.equal(m.result.ok, false);
+  assert.ok(m.result.errors.some((e) => e.scope === 'parity'));
+});
+
+test('Worker：同实例先旧代次后新代次回包，主线程按 requestId 隔离（协议字段保留）', () => {
+  const w = createWorker();
+  // 模拟连续两个不同代次请求；Worker 均如实回包，由主线程按 id 取舍。
+  w.post(
+    {
+      ports: 'A B C',
+      mode: 'parity',
+      operations: [
+        { name: 'r', mapping: '(A B C)' },
+        { name: 's', mapping: '(A B)' },
+      ],
+      parity: [0, 0],
+      target: '(A B)',
+    },
+    21
+  );
+  w.post(
+    {
+      ports: 'A B C',
+      mode: 'normal',
+      operations: [
+        { name: 'r', mapping: '(A B C)' },
+        { name: 's', mapping: '(A B)' },
+      ],
+      target: '(A B)',
+    },
+    22
+  );
+  assert.equal(w.messages.length, 2);
+  assert.equal(w.messages[0].requestId, 21);
+  assert.equal(w.messages[0].result.paritySatisfied, false);
+  assert.equal(w.messages[1].requestId, 22);
+  assert.equal(w.messages[1].result.member, true);
+  assert.equal(w.messages[1].result.paritySatisfied, undefined);
+});

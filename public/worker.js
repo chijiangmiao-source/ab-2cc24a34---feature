@@ -1,6 +1,7 @@
 'use strict';
 /*
- * worker.js —— 在 Web Worker 中执行确定性 Schreier–Sims 审计。
+ * worker.js —— 在 Web Worker 中执行确定性 Schreier–Sims 审计
+ *（普通可导出复核 / 执行奇偶复核：GF(2) 恒等关系空间求解与词回构）。
  * 每个请求带 requestId；主线程只按当前代次接收回包，旧回包一律丢弃。
  */
 importScripts('core.js');

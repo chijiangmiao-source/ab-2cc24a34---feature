@@ -382,3 +382,295 @@ test('代次防护：旧请求回包被拒绝，当前代次回包才被接受',
   assert.equal(fresh.accepted, true);
   assert.equal(fresh.payload.member, false);
 });
+
+// ---------- 执行奇偶复核（GF(2) 恒等关系空间） ----------
+
+// 在 (置换, GF(2)^m 奇偶掩码) 扩展状态空间上 BFS：应用生成元 k（含其逆）
+// 不改变掩码第 k 位之外的位。仅用于小规模下与奇偶复核结论做独立穷尽对照。
+function bruteParityGroup(n, gens) {
+  const id = C.identity(n);
+  const seen = new Set([id.join(',') + '|0']);
+  const queue = [{ p: id, mask: 0 }];
+  const reachable = new Set();
+  while (queue.length) {
+    const cur = queue.shift();
+    reachable.add(cur.p.join(',') + '|' + cur.mask);
+    for (let k = 0; k < gens.length; k++) {
+      for (const g of [gens[k], C.invert(gens[k], n)]) {
+        const np = C.compose(cur.p, g, n);
+        const nmask = cur.mask ^ (1 << k);
+        const key = np.join(',') + '|' + nmask;
+        if (!seen.has(key)) {
+          seen.add(key);
+          queue.push({ p: np, mask: nmask });
+        }
+      }
+    }
+  }
+  return reachable;
+}
+
+// 对全部 n! 目标 × 2^m 奇偶要求比较引擎结论与扩展状态空间穷尽结论
+function assertParityAgrees(n, gens) {
+  const m = gens.length;
+  const reachable = bruteParityGroup(n, gens);
+  const names = C.identity(n).map((_, i) => 'p' + i);
+  const ops = gens.map((g, i) => ({ name: 'g' + i, perm: g }));
+  let checked = 0;
+  for (const t of allPerms(n)) {
+    for (let mask = 0; mask < 1 << m; mask++) {
+      const desired = Array.from({ length: m }, (_, k) => (mask >> k) & 1);
+      const r = C.membership(names, ops, t, desired);
+      const expected = reachable.has(t.join(',') + '|' + mask);
+      assert.equal(
+        r.member === true && r.paritySatisfied === true,
+        expected,
+        '奇偶结论与扩展空间穷尽枚举不一致：target=' + t.join(',') + ' mask=' + mask
+      );
+      if (expected) {
+        // 规范因子链：乘回为目标、奇偶恰为要求
+        assert.deepEqual(C.multiplyWord(r.factorWord, gens, n), t);
+        assert.deepEqual(C.wordParityVector(r.factorWord, m), desired);
+        // 逐步回放终态计数奇偶与要求一致
+        const steps = C.expandFactorChain(names, ops, r.factorWord);
+        const last = steps[steps.length - 1];
+        assert.deepEqual(last.parity, desired);
+        assert.deepEqual(last.counts.map((c) => c & 1), desired);
+        // 补偶恒等词乘回必为恒等
+        if (r.correctionWord.length) {
+          assert.deepEqual(C.multiplyWord(r.correctionWord, gens, n), C.identity(n));
+        }
+      } else if (r.member === true) {
+        // 仅奇偶不可满足：必须返回代表向量、差额、独立关系基
+        assert.equal(r.reason, 'parity-infeasible');
+        assert.ok(Array.isArray(r.repParity) && r.repParity.length === m);
+        assert.deepEqual(
+          r.parityDiff,
+          desired.map((d, k) => d ^ r.repParity[k])
+        );
+        for (const vec of r.basis) {
+          assert.equal(vec.length, m);
+          assert.ok(vec.some((b) => b === 1));
+        }
+      }
+      checked++;
+    }
+  }
+  return checked;
+}
+
+test('奇偶穷尽对照 n=3：C3（单 3-循环）全部目标×2 种要求一致（12 组合）', () => {
+  assert.equal(assertParityAgrees(3, [cyc(3, [0, 1, 2])]), 12);
+});
+
+test('奇偶穷尽对照 n=3：S3 全部目标×4 种要求一致（24 组合）', () => {
+  assert.equal(assertParityAgrees(3, [cyc(3, [0, 1, 2]), cyc(3, [0, 1])]), 24);
+});
+
+test('奇偶穷尽对照 n=4：C4 全部目标×2 种要求一致（48 组合）', () => {
+  assert.equal(assertParityAgrees(4, [cyc(4, [0, 1, 2, 3])]), 48);
+});
+
+test('奇偶穷尽对照 n=4：Klein 四元群全部目标×4 种要求一致（96 组合）', () => {
+  assert.equal(
+    assertParityAgrees(4, [cyc(4, [0, 1], [2, 3]), cyc(4, [0, 2], [1, 3])]),
+    96
+  );
+});
+
+test('奇偶穷尽对照 n=4：S4 全部目标×4 种要求一致（96 组合）', () => {
+  assert.equal(
+    assertParityAgrees(4, [cyc(4, [0, 1, 2, 3]), cyc(4, [0, 1])]),
+    96
+  );
+});
+
+test('奇偶穷尽对照 n=5：两个 3-循环生成 A5，全部目标×4 种要求一致（480 组合）', () => {
+  assert.equal(
+    assertParityAgrees(5, [cyc(5, [0, 1, 2]), cyc(5, [2, 3, 4])]),
+    480
+  );
+});
+
+test('奇偶复核：S3 中对换必含奇数次对换操作，要求 [偶,偶] 不可满足并给出差额与关系基', () => {
+  const r = auditParity(
+    ['A', 'B', 'C'],
+    [
+      { name: 'r', mapping: '(A B C)' },
+      { name: 's', mapping: '(A B)' },
+    ],
+    [0, 0],
+    '(A B)'
+  );
+  assert.equal(r.ok, true);
+  assert.equal(r.member, true);
+  assert.equal(r.paritySatisfied, false);
+  assert.equal(r.reason, 'parity-infeasible');
+  // 代表词 (A B) 的奇偶向量为 [0,1]；与要求 [0,0] 的差额为 [0,1]
+  assert.deepEqual(r.repParity, [0, 1]);
+  assert.deepEqual(r.parityDiff, [0, 1]);
+  // 关系空间由 r³=id（奇偶 [1,0]）张成，一维；永远无法改变 s 位
+  assert.deepEqual(r.basis, [[1, 0]]);
+  // 关系基展示条目按（排序后的）操作名给出
+  assert.deepEqual(
+    r.basisRelations[0].entries.map((e) => e.operation),
+    ['r', 's']
+  );
+  assert.deepEqual(
+    r.repParityEntries.map((e) => [e.operation, e.bit, e.desired, e.diff]),
+    [
+      ['r', 0, 0, 0],
+      ['s', 1, 0, 1],
+    ]
+  );
+});
+
+test('奇偶复核：要求可行时规范因子链乘回为目标且逐操作计数奇偶相符', () => {
+  const r = auditParity(
+    ['A', 'B', 'C'],
+    [
+      { name: 'r', mapping: '(A B C)' },
+      { name: 's', mapping: '(A B)' },
+    ],
+    [1, 1],
+    '(A B)'
+  );
+  assert.equal(r.paritySatisfied, true);
+  const gens = [cyc(3, [0, 1, 2]), cyc(3, [0, 1])];
+  assert.deepEqual(C.multiplyWord(r.factorWord, gens, 3), cyc(3, [0, 1]));
+  assert.deepEqual(C.wordParityVector(r.factorWord, 2), [1, 1]);
+  // 补偶词非空（代表词本身奇偶为 [0,1]），且乘回为恒等
+  assert.ok(r.correctionWord.length > 0);
+  assert.deepEqual(C.multiplyWord(r.correctionWord, gens, 3), C.identity(3));
+  // 回放逐步计数：末步 [奇,奇]，全程排列合法
+  for (const st of r.steps) assert.ok(C.isPermutation(st.perm, 3));
+  assert.deepEqual(r.steps[r.steps.length - 1].counts.map((c) => c & 1), [1, 1]);
+});
+
+test('奇偶复核：恒等目标要求非零奇偶时，由恒等关系词（如 g³）满足', () => {
+  const r = auditParity(
+    ['A', 'B', 'C'],
+    [{ name: 'r', mapping: '(A B C)' }],
+    [1],
+    '(A)'
+  );
+  assert.equal(r.paritySatisfied, true);
+  assert.deepEqual(C.multiplyWord(r.factorWord, [cyc(3, [0, 1, 2])], 3), C.identity(3));
+  assert.deepEqual(C.wordParityVector(r.factorWord, 1), [1]);
+});
+
+test('奇偶复核：目标本身不可导出时仍给首个阻塞层，不进入奇偶判定', () => {
+  const r = auditParity(
+    ['A', 'B', 'C', 'D'],
+    [{ name: 'rotate', mapping: '(A B C D)' }],
+    [1],
+    '(A B)'
+  );
+  assert.equal(r.member, false);
+  assert.equal(r.reason, 'blocked');
+  assert.equal(r.paritySatisfied, undefined);
+  assert.ok(!r.evidence.orbitNames.includes(r.evidence.attemptedImageName));
+});
+
+test('奇偶复核：关系基每条乘回为恒等且奇偶向量与声明一致', () => {
+  const n = 4;
+  const gens = [cyc(n, [0, 1, 2, 3]), cyc(n, [0, 1])];
+  const levels = C.buildChain(
+    n,
+    gens,
+    gens.map((_, i) => [i + 1])
+  );
+  const sp = C.buildParitySpace(n, 2, levels);
+  for (let k = 0; k < sp.basis.length; k++) {
+    assert.deepEqual(C.multiplyWord(sp.basisWords[k], gens, n), C.identity(n));
+    assert.deepEqual(C.wordParityVector(sp.basisWords[k], 2), sp.basis[k]);
+  }
+});
+
+test('奇偶复核：确定性——相同输入给出相同因子链与关系基', () => {
+  const input = {
+    ports: 'A B C D',
+    mode: 'parity',
+    operations: [
+      { name: 'a', mapping: '(A B C)' },
+      { name: 'b', mapping: '(A B D)' },
+    ],
+    parity: [1, 0],
+    target: '(B C D)',
+  };
+  const r1 = C.audit(input);
+  const r2 = C.audit({ ...input, operations: [input.operations[1], input.operations[0]], parity: [0, 1] });
+  // 生成元经按名排序后内部顺序一致；parity 随操作录入序一起重排，结论词应相同
+  assert.deepEqual(r1.factorWord, r2.factorWord);
+  assert.deepEqual(r1.basis, r2.basis);
+});
+
+test('奇偶校验：未逐操作指定奇偶时一次性报错，普通模式不要求奇偶', () => {
+  const missing = C.audit({
+    ports: 'A B',
+    mode: 'parity',
+    operations: [{ name: 'x', mapping: '(A B)' }],
+    parity: [],
+    target: '(A B)',
+  });
+  assert.equal(missing.ok, false);
+  assert.ok(missing.errors.some((e) => e.scope === 'parity' && /未指定奇偶/.test(e.message)));
+
+  const invalidValue = C.audit({
+    ports: 'A B',
+    mode: 'parity',
+    operations: [{ name: 'x', mapping: '(A B)' }],
+    parity: ['weird'],
+    target: '(A B)',
+  });
+  assert.ok(invalidValue.errors.some((e) => e.scope === 'parity'));
+
+  // 普通模式传空 parity 不受影响（普通回归）
+  const normal = C.audit({
+    ports: 'A B',
+    operations: [{ name: 'x', mapping: '(A B)' }],
+    target: '(A B)',
+  });
+  assert.equal(normal.ok, true);
+  assert.equal(normal.mode, 'normal');
+  assert.equal(normal.paritySatisfied, undefined);
+});
+
+test('奇偶复核规模上限：n=12、8 操作下求解仍快速完成且结论可复算', () => {
+  const names = Array.from({ length: 12 }, (_, i) => 'P' + i);
+  const ops = [
+    { name: 'g_cycle', mapping: '(' + names.join(' ') + ')' },
+    { name: 'g_swap', mapping: '(P0 P1)' },
+    { name: 'g_p2', mapping: '(P2 P3)' },
+    { name: 'g_p4', mapping: '(P4 P5)' },
+    { name: 'g_p6', mapping: '(P6 P7)' },
+    { name: 'g_p8', mapping: '(P8 P9)' },
+    { name: 'g_p10', mapping: '(P10 P11)' },
+    { name: 'g_mid', mapping: '(P5 P8)' },
+  ];
+  const started = Date.now();
+  const r = C.audit({
+    ports: names.join(' '),
+    mode: 'parity',
+    operations: ops,
+    parity: [1, 0, 1, 0, 1, 0, 1, 0],
+    target: '(P0 P11)(P1 P10)',
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.member, true);
+  assert.ok(Date.now() - started < 10000, '12 端口奇偶求解应在合理时间内结束');
+  if (r.paritySatisfied) {
+    // desiredParity 已随操作名排序重排，回放计数须与回传要求逐位一致
+    assert.deepEqual(r.steps[r.steps.length - 1].parity, r.desiredParity);
+  }
+});
+
+function auditParity(names, ops, parity, targetText) {
+  return C.audit({
+    ports: names.join(' '),
+    mode: 'parity',
+    operations: ops,
+    parity,
+    target: targetText,
+  });
+}
