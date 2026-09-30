@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>光阑换位操作可导出性审计</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>光阑换位操作可导出性审计</h1>
+    <p class="subtitle">
+      在 Web Worker 中按端口标识排序建立确定性 Schreier–Sims 稳定子链，
+      由横截代表逐层复算判定目标置换能否由允许的换位操作导出。
+    </p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>1. 稳定端口（2–12 个，空格/逗号分隔）</h2>
+      <input id="ports" type="text" spellcheck="false" placeholder="A B C D" />
+
+      <h2>2. 具名置换操作（至多 8 个）</h2>
+      <p class="hint">
+        支持循环记号 <code>(A B)(C D)</code> 或显式映射 <code>A-&gt;B, B-&gt;A</code>；
+        操作允许执行其逆操作。每个操作必须是全部端口上的双射。
+      </p>
+      <div id="ops" class="ops"></div>
+      <div class="btn-row">
+        <button id="btn-add-op" type="button">＋ 添加操作</button>
+        <button id="btn-remove-op" type="button">－ 删除末行</button>
+      </div>
+
+      <h2>3. 目标置换</h2>
+      <input id="target" type="text" spellcheck="false" placeholder="(A C)(B D)" />
+
+      <div class="btn-row submit-row">
+        <button id="btn-audit" type="button">发起审计</button>
+        <button id="btn-example" type="button" class="secondary">载入示例</button>
+        <span id="status-line" class="status"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>审计结论</h2>
+      <div id="result">
+        <p class="muted">填写规程后点击“发起审计”。</p>
+      </div>
+
+      <div id="replay" class="replay hidden">
+        <h3>操作因子链逐步回放</h3>
+        <div class="btn-row">
+          <button id="btn-reset" type="button" class="secondary">⏮ 重置</button>
+          <button id="btn-prev" type="button" class="secondary">上一步</button>
+          <button id="btn-play" type="button">播放</button>
+          <button id="btn-next" type="button" class="secondary">下一步</button>
+        </div>
+        <div id="replay-view"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    成员判定仅使用稳定子链横截剥离复算，不枚举全部操作串、不使用随机搜索、不以有限深度回放代替。
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "aperture-permutation-audit",
+  "version": "1.0.0",
+  "description": "光阑换位操作可导出性审计（Schreier–Sims 稳定子链成员判定）",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/",
+    "build": "node scripts/build-check.js",
+    "verify": "node verify/run-verify.js"
+  },
+  "license": "MIT"
+}

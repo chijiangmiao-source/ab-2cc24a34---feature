@@ -1,0 +1,32 @@
+services:
+  web:
+    build: .
+    image: aperture-audit:latest
+    environment:
+      # 容器内服务端口（固定）
+      PORT: "8080"
+    ports:
+      # 可配置宿主机端口：HOST_PORT 环境变量（默认 8080）
+      # 使用方式：HOST_PORT=9090 docker compose up
+      - "${HOST_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+  verify:
+    build: .
+    image: aperture-audit:latest
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      BASE_URL: "http://web:8080"
+    working_dir: /app
+    command: ["node", "verify/run-verify.js"]
+    # 代码测试与构建检查在容器内本地执行；HTTP 冒烟经容器网络对 web 执行。
+    # 完成后即以状态码报告结果并退出（不长期运行）。
+    restart: "no"
